@@ -1,0 +1,86 @@
+package com.niki914.zafiro.app.ui.nav
+
+import androidx.annotation.StringRes
+import com.niki914.zafiro.app.R
+
+enum class ZafiroSettingsGroup(
+    @StringRes val titleRes: Int,
+    @StringRes val summaryRes: Int?,
+    val routeSuffix: String,
+) {
+    ModelConfig(
+        titleRes = R.string.ui_settings_model_config,
+        summaryRes = R.string.ui_settings_model_config_summary,
+        routeSuffix = "model-config",
+    ),
+    Memory(
+        titleRes = R.string.ui_settings_memory,
+        summaryRes = R.string.ui_settings_memory_summary,
+        routeSuffix = "memory",
+    ),
+    RuntimeControl(
+        titleRes = R.string.ui_settings_runtime_control,
+        summaryRes = R.string.ui_settings_runtime_control_summary,
+        routeSuffix = "runtime-control",
+    ),
+    Tools(
+        titleRes = R.string.ui_settings_tools,
+        summaryRes = R.string.ui_settings_tools_summary,
+        routeSuffix = "tools",
+    ),
+    Skills(
+        titleRes = R.string.ui_settings_skills,
+        summaryRes = R.string.ui_settings_skills_summary,
+        routeSuffix = "skills",
+    ),
+    Actions(
+        titleRes = R.string.ui_settings_actions,
+        summaryRes = R.string.ui_settings_actions_summary,
+        routeSuffix = "actions",
+    ),
+    Mcp(
+        titleRes = R.string.ui_settings_mcp,
+        summaryRes = R.string.ui_settings_mcp_summary,
+        routeSuffix = "mcp",
+    ),
+    McpService(
+        titleRes = R.string.ui_settings_mcp_service,
+        summaryRes = R.string.ui_settings_mcp_service_summary,
+        routeSuffix = "mcp-service",
+    ),
+    Browser(
+        titleRes = R.string.ui_settings_browser,
+        summaryRes = R.string.ui_settings_browser_summary,
+        routeSuffix = "browser",
+    ),
+    Takeover(
+        titleRes = R.string.ui_settings_takeover,
+        summaryRes = R.string.ui_settings_takeover_summary,
+        routeSuffix = "takeover",
+    ),
+    ExecutionRules(
+        titleRes = R.string.ui_settings_execution_rules,
+        summaryRes = R.string.ui_settings_execution_rules_summary,
+        routeSuffix = "execution-rules",
+    ),
+    Theme(
+        titleRes = R.string.ui_settings_general_group_appearance,
+        summaryRes = null,
+        routeSuffix = "theme",
+    ),
+    GeneralSettings(
+        titleRes = R.string.ui_settings_general,
+        summaryRes = R.string.ui_settings_general_summary,
+        routeSuffix = "general-settings",
+    ),
+    Storage(
+        titleRes = R.string.ui_settings_storage,
+        summaryRes = R.string.ui_settings_storage_summary,
+        routeSuffix = "storage",
+    ),
+    About(
+        titleRes = R.string.ui_settings_about,
+        summaryRes = R.string.ui_settings_about_summary,
+        routeSuffix = "about",
+    ),
+}

@@ -1,0 +1,459 @@
+package com.niki914.zafiro.repo
+
+import android.content.Context
+import android.content.ContextWrapper
+import com.niki914.store.StoreDescriptorRegistry
+import com.niki914.zafiro.app.util.SilentLoggerRule
+import com.niki914.zafiro.chat.agentic.buildin.BuiltinToolRegistry
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import com.niki914.zafiro.settings.model.RuntimeAgentMemoryMode as AgentMemoryMode
+import com.niki914.zafiro.settings.model.RuntimeAgentProfile as AgentProfile
+import com.niki914.zafiro.settings.model.RuntimeMcpServer as McpServer
+
+class XRepoDomainSettingsTest {
+    @get:Rule
+    val silentLoggerRule = SilentLoggerRule()
+
+    private val context: Context = object : ContextWrapper(null) {
+        override fun getApplicationContext(): Context = this
+        override fun getPackageName(): String = "com.niki914.zafiro"
+    }
+
+    @After
+    fun tearDown() {
+        XRepo.resetForTest()
+    }
+
+    @Test
+    fun appStateTogglePersistsAndKeepsOtherFields() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.setOnboardingCompleted(true)
+        XRepo.setLoadLastConversationOnStartup(false)
+        XRepo.setLanguageTag("zh-CN")
+
+        assertFalse(XRepo.loadLastConversationOnStartup())
+        assertEquals("zh-CN", XRepo.languageTag())
+        assertTrue(XRepo.onboardingCompleted())
+        assertTrue(XRepo.voiceAssistantIsolatedSession())
+
+        XRepo.setVoiceAssistantIsolatedSession(false)
+        assertFalse(XRepo.voiceAssistantIsolatedSession())
+        assertFalse(XRepo.voiceAssistantIsolatedSessionSetting.value)
+    }
+
+    @Test
+    fun draftText_persistsAndRecoversDefault() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        assertEquals("", XRepo.draftText())
+        XRepo.setDraftText("my global draft")
+        assertEquals("my global draft", XRepo.draftText())
+    }
+
+    @Test
+    fun setConversationPinned_addRemoveAndRepinKeepsLatestTimestamp() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.setConversationPinned("c1", pinned = true, now = 100L)
+        XRepo.setConversationPinned("c2", pinned = true, now = 200L)
+        assertEquals(
+            listOf(PinnedConversation("c1", 100L), PinnedConversation("c2", 200L)),
+            XRepo.pinnedConversations(),
+        )
+
+        // 重复置顶同一会话：更新时刻，不产生重复项
+        XRepo.setConversationPinned("c1", pinned = true, now = 300L)
+        assertEquals(
+            listOf(PinnedConversation("c2", 200L), PinnedConversation("c1", 300L)),
+            XRepo.pinnedConversations(),
+        )
+
+        XRepo.setConversationPinned("c1", pinned = false)
+        assertEquals(listOf(PinnedConversation("c2", 200L)), XRepo.pinnedConversations())
+    }
+
+    @Test
+    fun hydrateSettingsBackfillsAllReactiveFlows() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.APP_STATE_ID to
+                    """{"keep_screen_on":false,"always_show_message_actions":false,"floating_ball_enabled":true,"resident_notification_enabled":true,"floating_ball_auto_expand":false}""",
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        // flow 初值是猜的默认值，与盘上真值相反，hydrate 后必须对齐真值。
+        assertTrue(XRepo.keepScreenOnSetting.value)
+        assertTrue(XRepo.alwaysShowMessageActionsSetting.value)
+        assertFalse(XRepo.floatingBallEnabledSetting.value)
+        assertFalse(XRepo.residentNotificationEnabledSetting.value)
+        assertTrue(XRepo.floatingBallAutoExpandSetting.value)
+
+        XRepo.hydrateSettings()
+
+        assertFalse(XRepo.keepScreenOnSetting.value)
+        assertFalse(XRepo.alwaysShowMessageActionsSetting.value)
+        assertTrue(XRepo.floatingBallEnabledSetting.value)
+        assertTrue(XRepo.residentNotificationEnabledSetting.value)
+        assertFalse(XRepo.floatingBallAutoExpandSetting.value)
+    }
+
+    @Test
+    fun reactiveGetterBackfillsFlowOnRead() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.APP_STATE_ID to """{"floating_ball_enabled":true}""",
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        assertFalse(XRepo.floatingBallEnabledSetting.value)
+        assertTrue(XRepo.floatingBallEnabled())
+        assertTrue(XRepo.floatingBallEnabledSetting.value)
+    }
+
+    @Test
+    fun reactiveSetterSyncsFlowBeforeDiskWrite() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.setKeepScreenOn(false)
+
+        // flow 同步回显，盘上同样落盘。
+        assertFalse(XRepo.keepScreenOnSetting.value)
+        assertFalse(XRepo.keepScreenOn())
+    }
+
+    @Test
+    fun stringSettingsTrimOnWrite() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.setLanguageTag("  zh-CN  ")
+        XRepo.setLastOpenedConversationId("  conv-1  ")
+
+        assertEquals("zh-CN", XRepo.languageTag())
+        assertEquals("conv-1", XRepo.lastOpenedConversationId())
+    }
+
+    @Test
+    fun llmConfigs_upsertBlankNameFallsBackToProvider() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.llmConfigs.upsert(savedConfig(id = "cfg-1", model = "deepseek-chat").copy(name = " "))
+
+        assertEquals("deepseek", XRepo.llmConfigs.active()?.name)
+    }
+
+    @Test
+    fun activeSavedConfigReadsAndWritesOnlyLlmConfigsStore() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        assertNull(XRepo.llmConfigs.active())
+        XRepo.llmConfigs.upsert(savedConfig(id = "cfg-1", model = "gpt-test"))
+
+        assertEquals(
+            listOf(StoreDescriptorRegistry.LLM_CONFIGS_ID),
+            store.writeIds.distinct(),
+        )
+        assertEquals("cfg-1", XRepo.llmConfigs.active()?.id)
+        assertEquals("gpt-test", XRepo.llmConfigs.active()?.model)
+    }
+
+    private fun savedConfig(
+        id: String,
+        model: String,
+    ): SavedLlmConfig {
+        return SavedLlmConfig(
+            id = id,
+            name = id,
+            provider = "deepseek",
+            endpoint = "https://api.deepseek.com/chat/completions",
+            apiKey = "secret",
+            model = model,
+            protocol = "openai-responses",
+            proxy = "",
+        )
+    }
+
+    @Test
+    fun agentConfigReadsAndWritesOnlyExistingEnabledAgents() = runTest {
+        val enabledAgent = AgentProfile(
+            id = "agent_a",
+            name = "Agent A",
+            alias = "agent_a",
+            enabled = true,
+            memoryMode = AgentMemoryMode.SharedMain,
+        )
+        val disabledAgent = AgentProfile(
+            id = "agent_b",
+            name = "Agent B",
+            alias = "agent_b",
+            enabled = false,
+            memoryMode = AgentMemoryMode.SharedMain,
+        )
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.AGENT_REGISTRY_ID to AgentSettingsCodec.encodeRegistry(
+                listOf(enabledAgent, disabledAgent)
+            ),
+            StoreDescriptorRegistry.AGENT_MAIN_MEMORY_ID to MemorySettingsCodec.encodeMemories(
+                listOf("Fact"),
+                nowMillis = 1L,
+            ),
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+        assertEquals(listOf("Fact"), XRepo.agents.memoriesFor("agent_a"))
+        assertEquals(emptyList<String>(), XRepo.agents.memoriesFor("agent_b"))
+    }
+
+    @Test
+    fun memoryWritesOnlyAgentMainMemoryStore() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.memory.replaceAll(listOf(" A ", " ", "B"))
+
+        assertEquals(listOf(StoreDescriptorRegistry.AGENT_MAIN_MEMORY_ID), store.writeIds)
+        assertEquals(
+            listOf("A", "B"), MemorySettingsCodec.parseMemories(
+                store.jsonFor(
+                    StoreDescriptorRegistry.AGENT_MAIN_MEMORY_ID
+                )
+            )
+        )
+    }
+
+    @Test
+    fun mcpSaveRecoversBrokenServersJsonAndKeepsDottedName() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.TOOLS_MCP_SERVERS_ID to """{"servers":"""
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.mcp.save(McpServer("mcp.example.com", "https://mcp.example.com/mcp"))
+
+        assertEquals(listOf(StoreDescriptorRegistry.TOOLS_MCP_SERVERS_ID), store.writeIds)
+        assertEquals(
+            listOf(McpServer("mcp.example.com", "https://mcp.example.com/mcp")),
+            McpSettingsCodec.parseServers(store.jsonFor(StoreDescriptorRegistry.TOOLS_MCP_SERVERS_ID)),
+        )
+    }
+
+    @Test
+    fun builtinGroupWriteThroughTogglesAllMembersAtomically() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        val validation = XRepo.builtinTools.setGroupEnabled("screen_operation", false)
+
+        assertNull(validation)
+        assertEquals(1, store.writeIds.count { it == StoreDescriptorRegistry.TOOLS_BUILTIN_ID })
+        val settings = XRepo.builtinTools.list().associateBy { it.name }
+        assertFalse(settings.getValue("screen_operation_accessibility").enabled)
+        assertFalse(settings.getValue("screen_operation_shell").enabled)
+        assertTrue(settings.getValue("shell").enabled)
+
+        // 未知的组返回校验错误且不写盘
+        val unknown = XRepo.builtinTools.setGroupEnabled("no_such_group", true)
+        assertEquals(1, store.writeIds.count { it == StoreDescriptorRegistry.TOOLS_BUILTIN_ID })
+        assertEquals("groupId", unknown!!.field)
+    }
+
+    @Test
+    fun builtinGroupsReferenceRegisteredToolsWithoutOverlap() {
+        val registryNames = BuiltinToolRegistry.default()
+            .all().map { it.name }.toSet()
+        val groupedNames = BuiltinToolGroups.all.flatMap { it.members }
+
+        assertEquals(groupedNames.size, groupedNames.toSet().size)
+        assertTrue(groupedNames.all { it in registryNames })
+    }
+
+    @Test
+    fun builtinV2UnknownToolFlagDoesNotLeakToRegisteredTools() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.TOOLS_BUILTIN_ID to ToolSettingsCodec.encodeBuiltinEnabled(
+                mapOf("ghost_tool" to false)
+            )
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        val launchApp = XRepo.builtinTools.list().first { it.name == "launch_app" }
+
+        assertTrue(launchApp.enabled)
+        assertTrue(store.writeIds.isEmpty())
+    }
+
+    @Test
+    fun builtinV2ExplicitDisabledFlagIsHonored() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.TOOLS_BUILTIN_ID to ToolSettingsCodec.encodeBuiltinEnabled(
+                mapOf("launch_app" to false)
+            )
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        val launchApp = XRepo.builtinTools.list().first { it.name == "launch_app" }
+
+        assertFalse(launchApp.enabled)
+        assertTrue(store.writeIds.isEmpty())
+    }
+
+    @Test
+    fun onboardingCompletedWritesOnlyAppStateStore() = runTest {
+        val store = FakeDomainSettingsStore()
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        XRepo.setOnboardingCompleted(true)
+
+        assertEquals(listOf(StoreDescriptorRegistry.APP_STATE_ID), store.writeIds)
+        val root =
+            Json.parseToJsonElement(store.jsonFor(StoreDescriptorRegistry.APP_STATE_ID)).jsonObject
+        assertEquals("true", root["onboarding_completed"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun executionRulesCanBeExplicitlyClearedWithoutDefaultRulesReturning() = runTest {
+        val store = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.RULES_EXECUTION_ID to RuleSettingsCodec.encodeExecutionRules(
+                LocalSettingsDefaults.defaultExecutionRules
+            )
+        )
+        XRepo.installStoreForTest(store)
+        XRepo.init(context)
+
+        LocalSettingsDefaults.defaultExecutionRules.forEach { rule ->
+            XRepo.executionRules.delete(rule.id)
+        }
+
+        assertEquals(emptyList<Any>(), XRepo.executionRules.list())
+    }
+
+    // 保护：旧配置文件没有 keepScreenOn 字段时，解析必须兜底为 true。
+    // 写成 false 会让已升级用户的 MCP 常亮静默失效，且不看代码发现不了。
+    @Test
+    fun mcpServiceKeepScreenOnDefaultsTrueAndPersistsExplicitValue() = runTest {
+        val legacyStore = FakeDomainSettingsStore(
+            StoreDescriptorRegistry.TOOLS_MCP_SERVICE_ID to
+                    """{"enabled":true,"port":8791,"host":"127.0.0.1","exposedTools":[]}"""
+        )
+        XRepo.installStoreForTest(legacyStore)
+        XRepo.init(context)
+        assertTrue(XRepo.mcpService.get().keepScreenOn)
+
+        XRepo.mcpService.setKeepScreenOnWhileRunning(false)
+        assertFalse(XRepo.mcpService.get().keepScreenOn)
+    }
+
+    // 保护：configFlow 必须立刻发出一次，而不是等 get() 读完盘。
+    // 它是 AgentWakeLockController 的 combine 上游，任一来源不发射会让整条 combine 永不发射，
+    // 导致唤醒锁静默失效（后台 Agent 被系统休眠掐断）——无异常无日志，只能靠这条契约拦住。
+    @Test
+    fun mcpServiceConfigFlowEmitsBeforeAnyGet() = runTest {
+        // 用全新实例，避开 resetForTest 对单例的赋值，验证的是类自身的种子。
+        val fresh = McpServiceApi(XRepo)
+
+        assertTrue(fresh.configFlow.first().keepScreenOn)
+    }
+
+    private class FakeDomainSettingsStore(
+        vararg initialJson: Pair<String, String>,
+        private val ownerWriteSucceeds: Boolean = true,
+    ) : DomainSettingsStore {
+        private val jsonByStoreId = initialJson.toMap().toMutableMap()
+        val readIds = mutableListOf<String>()
+        val writeIds = mutableListOf<String>()
+        val mutateCalls = mutableListOf<Pair<String, String>>()
+
+        override suspend fun readJson(context: Context, storeId: String): String {
+            readIds += storeId
+            return jsonByStoreId[storeId]
+                ?: StoreDescriptorRegistry.resolveDynamic(storeId)?.defaultJson
+                ?: "{}"
+        }
+
+        override suspend fun writeJsonFromOwner(
+            context: Context,
+            storeId: String,
+            json: String
+        ): Boolean {
+            if (!ownerWriteSucceeds) {
+                return false
+            }
+            writeIds += storeId
+            jsonByStoreId[storeId] = json
+            return true
+        }
+
+        override suspend fun mutateJson(
+            context: Context,
+            storeId: String,
+            path: String,
+            value: Any?
+        ): Boolean {
+            mutateCalls += storeId to path
+            val current =
+                Json.parseToJsonElement(jsonByStoreId[storeId] ?: "{}").jsonObject.toMutableMap()
+            current[path] = value.toJsonElement()
+            jsonByStoreId[storeId] = JsonObject(current).toString()
+            return true
+        }
+
+        fun jsonFor(storeId: String): String {
+            return jsonByStoreId[storeId] ?: error("Missing json for $storeId")
+        }
+
+        private fun Any?.toJsonElement(): JsonElement {
+            return when (this) {
+                null -> JsonNull
+                is Boolean -> JsonPrimitive(this)
+                is Int -> JsonPrimitive(this)
+                is Long -> JsonPrimitive(this)
+                is Float -> JsonPrimitive(this)
+                is Double -> JsonPrimitive(this)
+                is String -> JsonPrimitive(this)
+                is Map<*, *> -> JsonObject(mapNotNull { (key, value) ->
+                    key?.toString()?.let { it to value.toJsonElement() }
+                }.toMap())
+
+                is Iterable<*> -> JsonArray(map { item -> item.toJsonElement() })
+                is Array<*> -> JsonArray(map { item -> item.toJsonElement() })
+                else -> JsonPrimitive(toString())
+            }
+        }
+    }
+}

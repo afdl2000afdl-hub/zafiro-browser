@@ -1,0 +1,309 @@
+package com.niki914.zafiro.app.ui.nav
+
+import androidx.annotation.StringRes
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.niki914.uikit.infra.nav.Page
+import com.niki914.zafiro.app.R
+import com.niki914.zafiro.repo.BuiltinToolGroups
+
+sealed interface PageTitleSpec
+
+data object NoTitle : PageTitleSpec
+
+data class ResTitle(
+    @StringRes val resId: Int,
+) : PageTitleSpec
+
+data class TextTitle(
+    val value: String,
+) : PageTitleSpec
+
+data class TopBarActionSpec(
+    val icon: ImageVector,
+    val onClick: (() -> Unit)? = null,
+    val contentDescription: String? = null,
+)
+
+sealed interface ZafiroPage : Page {
+    val titleSpec: PageTitleSpec
+    val leftAction: TopBarActionSpec?
+    val rightAction: TopBarActionSpec?
+    val showBlurLayer: Boolean
+        get() = true
+
+    /**
+     * 顶栏标题模式：Pinned = 小标题常驻（到顶时背景透明但标题照常显示）；
+     * Collapsible = 大标题在内容顶部，随滚动切换为小标题（设置 spec 页）。
+     */
+    val titleMode: TitleBarMode
+        get() = TitleBarMode.Pinned
+
+    /**
+     * 是否允许系统返回键驱动页面回退。false 时返回键不触发 pop，
+     * 用于 onboarding 入口页防止退回动画页。
+     */
+    val backEnabled: Boolean
+        get() = true
+}
+
+enum class TitleBarMode { Pinned, Collapsible }
+
+data object StartupPage : ZafiroPage {
+    override val routeKey: String = "startup"
+    override val titleSpec: PageTitleSpec = NoTitle
+    override val leftAction: TopBarActionSpec? = null
+    override val rightAction: TopBarActionSpec? = null
+    override val showBlurLayer: Boolean = false
+}
+
+data object OnboardingThemePage : ZafiroPage {
+    override val routeKey: String = "onboarding-theme"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_settings_general_group_appearance)
+
+    // onboarding 首次流程单向推进：隐藏左上角按钮 + 拦截返回键。
+    override val leftAction: TopBarActionSpec? = null
+    override val rightAction: TopBarActionSpec? = null
+    override val backEnabled: Boolean = false
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data object ProviderPickPage : ZafiroPage {
+    override val routeKey: String = "provider-pick"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_onboard_provider_pick_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data object SettingsProviderPickPage : ZafiroPage {
+    override val routeKey: String = "settings-provider-pick"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_onboard_provider_pick_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data class ConfigurePage(
+    val providerId: String? = null,
+    val explicitTitleSpec: PageTitleSpec? = null,
+) : ZafiroPage {
+    override val routeKey: String = if (providerId == null) "configure" else "configure:$providerId"
+    override val titleSpec: PageTitleSpec =
+        explicitTitleSpec ?: ResTitle(R.string.ui_onboard_configure_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data class SavedConfigDetailPage(
+    /** null = 新建（品牌选择后进入）。 */
+    val configId: String?,
+    val configName: String,
+    val providerId: String? = null,
+) : ZafiroPage {
+    val isCreating: Boolean
+        get() = configId == null
+    override val routeKey: String = "saved-config-detail:${configId ?: providerId ?: "new"}"
+    override val titleSpec: PageTitleSpec = TextTitle(configName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+
+    // Delete 由内容层 PageChrome 提供（生效中的配置不提供删除）
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data object DonePage : ZafiroPage {
+    override val routeKey: String = "done"
+    override val titleSpec: PageTitleSpec = NoTitle
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data object OnboardingPreferencesPage : ZafiroPage {
+    override val routeKey: String = "onboarding-preferences"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_onboard_preferences_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data object HomePage : ZafiroPage {
+    override val routeKey: String = "home"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_home_title)
+    override val leftAction: TopBarActionSpec? = null
+    override val rightAction: TopBarActionSpec = TopBarActionSpec(
+        icon = Icons.Default.MoreHoriz,
+        contentDescription = "More Button",
+    )
+}
+
+data object ConversationHistoryPage : ZafiroPage {
+    override val routeKey: String = "conversation-history"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_conversation_history_title)
+    override val leftAction: TopBarActionSpec? = null
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data object SettingsHomePage : ZafiroPage {
+    override val routeKey: String = "settings-home"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_settings_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data class SettingsDetailPage(
+    val group: ZafiroSettingsGroup,
+    val explicitTitleSpec: PageTitleSpec? = null,
+) : ZafiroPage {
+    override val routeKey: String = "settings-detail:${group.routeSuffix}"
+    override val titleSpec: PageTitleSpec = explicitTitleSpec ?: ResTitle(group.titleRes)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+
+    // 全部组均渲染大标题页（ModelConfig 已迁移到 SettingsListPageContent）。
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data class McpServerDetailPage(
+    val serverName: String,
+    val serverIndex: Int,
+    val isCreating: Boolean = false,
+) : ZafiroPage {
+    override val routeKey: String = "mcp-server-detail:$serverIndex:$serverName"
+    override val titleSpec: PageTitleSpec = TextTitle(serverName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? =
+        if (isCreating) null else TopBarActionSpec(icon = Icons.Default.Delete, contentDescription = "Delete Button")
+}
+
+data class TextActionDetailPage(
+    val actionName: String,
+    val actionIndex: Int,
+    val isCreating: Boolean = false,
+) : ZafiroPage {
+    override val routeKey: String = "text-action-detail:$actionIndex:$actionName"
+    override val titleSpec: PageTitleSpec = TextTitle(actionName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? =
+        if (isCreating) null else TopBarActionSpec(icon = Icons.Default.Delete, contentDescription = "Delete Button")
+}
+
+data class ExecutionRuleDetailPage(
+    val ruleName: String,
+    val ruleIndex: Int,
+    val isCreating: Boolean = false,
+) : ZafiroPage {
+    override val routeKey: String = "execution-rule-detail:$ruleIndex:$ruleName"
+    override val titleSpec: PageTitleSpec = TextTitle(ruleName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data class TakeoverRuleDetailPage(
+    val ruleId: String?,
+    val ruleName: String,
+    val ruleIndex: Int,
+    val isCreating: Boolean = false,
+) : ZafiroPage {
+    override val routeKey: String = "takeover-rule-detail:${ruleId ?: "new"}:$ruleIndex:$ruleName"
+    override val titleSpec: PageTitleSpec = TextTitle(ruleName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? =
+        if (isCreating) null else TopBarActionSpec(icon = Icons.Default.Delete, contentDescription = "Delete Button")
+}
+
+data object PromptEditPage : ZafiroPage {
+    override val routeKey: String = "prompt-edit"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_settings_configure_prompt_label)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data class SavedConfigPromptEditPage(
+    val configId: String?,
+    val providerId: String? = null,
+) : ZafiroPage {
+    override val routeKey: String = "saved-config-prompt-edit:${configId ?: providerId ?: "new"}"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_settings_configure_prompt_label)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+data object CustomPyToolsPage : ZafiroPage {
+    override val routeKey: String = "custom-py-tools"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.custom_py_tool_page_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data class CustomPyToolDetailPage(
+    val toolName: String,
+    val toolIndex: Int,
+    val isCreating: Boolean = false,
+) : ZafiroPage {
+    override val routeKey: String = "custom-py-tool-detail:$toolIndex:$toolName"
+    override val titleSpec: PageTitleSpec = TextTitle(toolName)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? =
+        if (isCreating) null else TopBarActionSpec(icon = Icons.Default.Delete, contentDescription = "Delete Button")
+}
+
+data class SkillDetailPage(
+    val skillId: String,
+    val skillTitle: String,
+) : ZafiroPage {
+    override val routeKey: String = "skill-detail:$skillId"
+    override val titleSpec: PageTitleSpec = TextTitle(skillTitle)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = TopBarActionSpec(icon = Icons.Default.Delete, contentDescription = "Delete Button")
+}
+
+data class BuiltinToolGroupDetailPage(
+    val groupId: String,
+) : ZafiroPage {
+    override val routeKey: String = "builtin-tool-group:$groupId"
+    override val titleSpec: PageTitleSpec = ResTitle(
+        BuiltinToolGroups.find(groupId)?.titleRes
+            ?: R.string.ui_settings_tools
+    )
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+    override val titleMode: TitleBarMode = TitleBarMode.Collapsible
+}
+
+data object MarkdownScalePage : ZafiroPage {
+    override val routeKey: String = "markdown-scale"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_settings_markdown_scale_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}
+
+/** IAB（内置浏览器）页面：可视化操作 agent 的 browser 工具（标签 / 地址栏 / 控制台 / 下载）。 */
+data object IabBrowserPage : ZafiroPage {
+    override val routeKey: String = "iab-browser"
+    override val titleSpec: PageTitleSpec = ResTitle(R.string.ui_iab_browser_title)
+    override val leftAction: TopBarActionSpec =
+        TopBarActionSpec(icon = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back Button")
+    override val rightAction: TopBarActionSpec? = null
+}

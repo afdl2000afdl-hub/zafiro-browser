@@ -1,0 +1,43 @@
+package com.niki914.zafiro.mod
+
+import android.content.Context
+import com.niki914.store.IpcReadResult
+import com.niki914.store.IpcWriteResult
+import com.niki914.store.XIpcBridge
+import com.niki914.xposed.api.util.ContextProvider
+
+object XService {
+
+    suspend fun getLocalSettings(context: Context, client: XIpcBridge.StoreClient?): LocalSettings {
+        return when (val result = XIpcBridge.readLocalSettingsJson(context, client)) {
+            is IpcReadResult.Success -> LocalSettings(parseJsonObject(result.json))
+            is IpcReadResult.Unreachable -> LocalSettings()
+            is IpcReadResult.NotFound -> LocalSettings()
+        }
+    }
+
+    suspend fun putLocalSettings(
+        context: Context,
+        settings: LocalSettings,
+        client: XIpcBridge.StoreClient?
+    ) {
+        XIpcBridge.writeLocalSettingsJson(context, settings.props.toString(), client)
+    }
+
+    suspend fun postNotification(
+        title: String,
+        content: String,
+        uri: String?,
+        client: XIpcBridge.StoreClient?,
+    ): Boolean {
+        val context = ContextProvider.await()
+        return XIpcBridge.postNotification(
+            context,
+            title,
+            content,
+            uri,
+            client
+        ) is IpcWriteResult.Success
+    }
+
+}

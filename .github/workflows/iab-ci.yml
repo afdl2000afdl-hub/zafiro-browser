@@ -1,0 +1,79 @@
+name: IAB CI
+
+# IAB（内置浏览器）交付管线。
+# 硬门：unit 单测（G1） + debug APK 可构建并上传（G2）。
+# 附加：生成 CI keystore 打 release APK（尽力而为，失败不阻断 debug 交付）。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "iab", "iab-ci" ]
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'   # Chaquopy buildPython requirement
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # ---- G1：全模块 JVM 单测（含 IAB 纯逻辑 + 工具契约）----
+      - name: Run unit tests (all modules)
+        run: ./gradlew testDebugUnitTest --no-daemon --stacktrace
+
+      # ---- G2：debug APK（免签名密钥，必交付）----
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zafiro-iab-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      # ---- 附加：生成 keystore 打 release APK（尽力而为）----
+      - name: Generate CI release keystore
+        run: |
+          mkdir -p packing
+          keytool -genkeypair -v \
+            -keystore packing/nexus_release.jks \
+            -storetype JKS \
+            -alias nexus_key \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass zafiro_iab_ci -keypass zafiro_iab_ci \
+            -dname "CN=Zafiro IAB CI, OU=CI, O=Zafiro, C=US"
+
+      - name: Build release APK (best effort)
+        continue-on-error: true
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon --stacktrace \
+            -PRELEASE_STORE_PASSWORD=zafiro_iab_ci \
+            -PRELEASE_KEY_ALIAS=nexus_key \
+            -PRELEASE_KEY_PASSWORD=zafiro_iab_ci
+
+      - name: Upload release APK artifact (if built)
+        if: always() && hashfiles('app/build/outputs/apk/release/*.apk') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Zafiro-iab-release
+          path: app/build/outputs/apk/release/
+          if-no-files-found: ignore

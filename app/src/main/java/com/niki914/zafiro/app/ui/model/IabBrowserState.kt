@@ -136,17 +136,9 @@ class IabBrowserViewModel :
 
             IabBrowserIntent.Screenshot -> {
                 try {
-                    val result = IabManager.screenshot(null)
-                    when (result) {
-                        is com.niki914.zafiro.chat.agentic.image.IngestResult.Ok -> {
-                            updateState { copy(screenshotPath = result.image.path) }
-                            sendEffect(IabBrowserEffect.Toast("Screenshot saved: ${result.image.path}"))
-                        }
-
-                        is com.niki914.zafiro.chat.agentic.image.IngestResult.Err -> {
-                            updateState { copy(lastError = "Screenshot failed: ${result.error}") }
-                        }
-                    }
+                    val path = IabManager.screenshotPath(null)
+                    updateState { copy(screenshotPath = path) }
+                    sendEffect(IabBrowserEffect.Toast("Screenshot saved: $path"))
                 } catch (e: IabError) {
                     updateState { copy(lastError = "${e.code}: ${e.message}") }
                 }

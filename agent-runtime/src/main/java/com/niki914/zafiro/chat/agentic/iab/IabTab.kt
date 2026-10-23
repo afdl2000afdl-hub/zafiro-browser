@@ -68,10 +68,10 @@ data class IabDownload(
     val id: String,
     val url: String,
     val path: String,
-    val sizeBytes: Long,
-    val status: String, // SAVING / DONE / FAILED
+    var sizeBytes: Long,
+    var status: String, // SAVING / DONE / FAILED（落盘流转中更新）
     val startedAtMs: Long,
-    val error: String? = null,
+    var error: String? = null,
 )
 
 /**

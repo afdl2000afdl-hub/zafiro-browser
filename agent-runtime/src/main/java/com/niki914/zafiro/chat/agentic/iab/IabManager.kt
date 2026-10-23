@@ -178,8 +178,8 @@ object IabManager {
     }
 
     private fun IabTab.configureClients() {
-        webView.webViewClient = IabWebViewClient(this)
-        webView.webChromeClient = IabWebChromeClient(this)
+        webView.webViewClient = IabWebViewClient(IabManager)
+        webView.webChromeClient = IabWebChromeClient(IabManager)
     }
 
     /** 新建标签（url 为 null = 空白页）。 */
@@ -344,6 +344,18 @@ object IabManager {
     }
 
     // ------------------------------------------------------------- screenshot
+
+    /**
+     * 截图（公共 UI 侧入口）：成功返回落盘路径（String，跨模块可见）；
+     * 失败抛 [IabError]（code = IAB_SCREENSHOT_FAILED / IAB_VIEW_DETACHED / IAB_UNAVAILABLE）。
+     * 工具侧请直接用 [screenshot]（内部 IngestResult 契约，与 screenshot/view_image 一致）。
+     */
+    suspend fun screenshotPath(tabId: String?): String {
+        return when (val r = screenshot(tabId)) {
+            is IngestResult.Ok -> r.image.path
+            is IngestResult.Err -> throw IabError(IAB_SCREENSHOT_FAILED, "screenshot failed: ${r.error}")
+        }
+    }
 
     /** PixelCopy 当前标签 WebView → PNG → 共享 ingest 管线（与 screenshot / view_image 同契约）。 */
     suspend fun screenshot(tabId: String?): IngestResult {
@@ -811,11 +823,18 @@ object IabManager {
             }
         }
 
-        override fun onGeolocationPermissionsShowPrompt(origin: String?, invoke: ValueCallback<Boolean>?) {
-            if (manager.autoGrantMedia) {
-                runCatching { invoke?.onReceiveValue(true) }
-            } else {
-                runCatching { invoke?.onReceiveValue(false) }
+        override fun onGeolocationPermissionsShowPrompt(
+            origin: String?,
+            callback: android.webkit.GeolocationPermissions.Callback?,
+        ) {
+            runCatching {
+                callback?.onGeolocationPermissionsShowPrompt(origin) { invoke ->
+                    if (manager.autoGrantMedia) invoke.onReceiveValue(true) else invoke.onReceiveValue(false)
+                    manager.activeTabForWebView()?.networkLog?.add(
+                        IabNetworkEntry(System.currentTimeMillis(), "GEO", origin.orEmpty(), null, if (manager.autoGrantMedia) "granted" else "denied")
+                    )
+                    false // 结果已由 onReceiveValue 给出
+                }
             }
         }
     }

@@ -196,7 +196,7 @@ object IabJs {
     /** 填输入框（React 兼容：走原型 value setter + input/change 事件）。 */
     fun fill(selector: String, value: String): String {
         val sel = jsQuote(selector)
-        val val = jsQuote(value)
+        val valQuoted = jsQuote(value)
         return """
             (function(){
               try {
@@ -207,7 +207,7 @@ object IabJs {
                 var isTa = typeof HTMLTextAreaElement !== "undefined" && el instanceof HTMLTextAreaElement;
                 var proto = isTa ? HTMLTextAreaElement.prototype : (typeof HTMLInputElement !== "undefined" && el instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLSelectElement.prototype);
                 var desc = Object.getOwnPropertyDescriptor(proto, "value");
-                var v = ${val};
+                var v = ${valQuoted};
                 if (desc && desc.set) desc.set.call(el, v); else el.value = v;
                 el.dispatchEvent(new Event("input", { bubbles: true }));
                 el.dispatchEvent(new Event("change", { bubbles: true }));

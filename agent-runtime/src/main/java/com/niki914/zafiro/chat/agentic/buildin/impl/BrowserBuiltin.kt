@@ -29,7 +29,7 @@ import kotlinx.serialization.json.put
  * 读取（evaluate/page_text/page_html/query_selector/state/console/network）、
  * 交互（click/click_text/click_at/fill/set_checked/select_option/keypress/scroll/submit_form）、
  * 文件（file_upload/downloads/open_local/print_pdf）、
- * 环境（screenshot/cookies_*/clipboard_*/set_ua/set_zoom/emulate_desktop/set_media_grant）。
+ * 环境（screenshot、cookie get/set/clear、clipboard read/write、set_ua、set_zoom、emulate_desktop、set_media_grant）。
  *
  * 依赖装配：[IabManager] 为进程单例（上下文来自 App 启动的 ContextProvider），本工具零参构造，
  * 与 ScreenshotBuiltin/ViewImageBuiltin 同一模式。冷启动未就绪时返回 IAB_UNAVAILABLE（不挂起、不抛）。
@@ -74,14 +74,14 @@ when a page looks like a mobile layout, emulate_desktop {enabled: true} then rel
             return BuiltinToolResult.failure(
                 code = "MISSING_ACTION",
                 message = "Field 'action' is required.",
-                fieldErrors = mapOf("action" to "required, one of: ${ACTIONS.joinToString(",")},
+                fieldErrors = mapOf("action" to "required, one of: ${ACTIONS.joinToString(", ")}"),
             )
         }
         if (action !in ACTIONS) {
             return BuiltinToolResult.failure(
                 code = "UNSUPPORTED_ACTION",
                 message = "Unknown action '$action'.",
-                fieldErrors = mapOf("action" to "must be one of: ${ACTIONS.joinToString(",")},
+                fieldErrors = mapOf("action" to "must be one of: ${ACTIONS.joinToString(", ")}"),
             )
         }
         // 冷启动未就绪时，IabManager 的各入口经 contextOrUnavailable 抛 IabError(IAB_UNAVAILABLE)，

@@ -4,11 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
-import android.os.CompletableFuture
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.view.ContextMenu
 import android.view.PixelCopy
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -41,6 +39,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
 
 /**
@@ -56,11 +55,11 @@ import java.util.concurrent.TimeUnit
  *   select_option / keypress / scroll / submit_form。
  * - 文件上传：JS 点击 input[type=file] 触发原生选择器 → onShowFileChooser 回填 FileProvider Uri，
  *   只接受 App 私有目录内的文件（filesDir / cacheDir）。
- * - 下载捕获：onDownloadStart → 后台落盘 filesDir/downloads/，环形记录（status/size 可查）。
+ * - 下载捕获：WebView.setDownloadListener → 后台落盘 filesDir/downloads/，环形记录（status/size 可查）。
  * - 截图：PixelCopy(WebView) → PNG → SharedImageCodec ingest（与 screenshot/view_image 同契约）。
  * - 日志：控制台钩子（console.* → 500 条环形缓冲）+ 网络请求级日志（200 条环形缓冲）。
  * - Cookie：android.webkit CookieManager（WebView 数据目录内跨重启持久）。
- * - 其余：剪贴板读写、UA 覆盖、桌面模式、缩放、媒体/地理权限请求（可开关自动放行）、
+ * - 其余：剪贴板读写、UA 覆盖、桌面模式、缩放、媒体权限请求（onPermissionRequest 可开关自动放行）、
  *   打印 PDF、本地文件 / HTML 字符串预览（data: URI）。
  *
  * 线程模型：全部 WebView 访问走主线程（withContext(Dispatchers.Main)）；下载在 IO 线程；
@@ -90,7 +89,7 @@ object IabManager {
     /** evaluate 引擎回调超时（防标签销毁 / 页面崩溃导致永久挂起）。 */
     private const val EVALUATE_TIMEOUT_MS = 60_000L
 
-    class IabError(val code: String, message: String) : Exception(message)
+    class IabError(val code: String, val message: String) : Exception(message)
 
     /** 文件上传结果：ACCEPTED = 内核已接受；CHOOSER_SKIPPED = 选择器未弹出或选择被取消。 */
     data class IabUploadResult(val status: String, val detail: String)
@@ -168,11 +167,10 @@ object IabManager {
         s.domStorageEnabled = true
         s.mediaPlaybackRequiresUserGesture = false
         s.builtInZoomControls = false
-        s.supportZoom = true
+        s.setSupportZoom(true)
         s.cacheMode = WebSettings.LOAD_DEFAULT
         s.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
         s.setJavaScriptCanOpenWindowsAutomatically(true)
-        s.javaScriptCanOpenWindows = true
         s.userAgentString = customUserAgent ?: s.userAgentString
         return webView
     }
@@ -180,6 +178,11 @@ object IabManager {
     private fun IabTab.configureClients() {
         webView.webViewClient = IabWebViewClient(IabManager)
         webView.webChromeClient = IabWebChromeClient(IabManager)
+        // 下载钩子挂在 WebView 自身（WebChromeClient 无 onDownloadStart 重载可覆写）
+        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+            val t = tabForWebView(webView) ?: activeTabForWebView()
+            t?.let { handleDownloadStart(it, url, userAgent, contentDisposition, mimeType) }
+        }
     }
 
     /** 新建标签（url 为 null = 空白页）。 */
@@ -358,7 +361,7 @@ object IabManager {
     }
 
     /** PixelCopy 当前标签 WebView → PNG → 共享 ingest 管线（与 screenshot / view_image 同契约）。 */
-    suspend fun screenshot(tabId: String?): IngestResult {
+    internal suspend fun screenshot(tabId: String?): IngestResult {
         val ctx = contextOrUnavailable()
         val codec = SharedImageCodec.get()
             ?: throw IabError(IAB_UNAVAILABLE, "Image codec is not available (context not ready).")
@@ -440,7 +443,7 @@ object IabManager {
         val countJson = evaluate(tab.id, IabJs.uploadFileCount(inputSelector)) ?: "{}"
         val files = runCatching {
             Json.parseToJsonElement(countJson).jsonObject["files"]?.jsonPrimitive?.content?.toIntOrNull()
-        }.getOrDefault(-1)
+        }.getOrNull() ?: -1
         return if (files >= 1) {
             IabUploadResult("ACCEPTED", "WebView accepted the file (input.files.length=$files).")
         } else {
@@ -451,7 +454,7 @@ object IabManager {
 
     // ------------------------------------------------------------- downloads
 
-    /** 主线程回调（由 [IabWebChromeClient.onDownloadStart] 触发）：登记 + 后台落盘。 */
+    /** 主线程回调（由 WebView.setDownloadListener 触发）：登记 + 后台落盘。 */
     fun handleDownloadStart(tab: IabTab, url: String, userAgent: String?, contentDisposition: String?, mimeType: String?) {
         if (context == null) return
         val dir = File(context!!.filesDir, "downloads")
@@ -471,12 +474,12 @@ object IabManager {
                 target.parentFile?.mkdirs()
                 val conn = URL(url).openConnection() as? HttpURLConnection
                     ?: throw IabError(IAB_DOWNLOAD_FAILED, "Unsupported protocol for: $url")
-                conn.requestProperty("User-Agent", userAgent ?: defaultUserAgent ?: "Mozilla/5.0")
+                conn.setRequestProperty("User-Agent", userAgent ?: defaultUserAgent ?: "Mozilla/5.0")
                 conn.connectTimeout = 30_000
                 conn.readTimeout = 120_000
                 conn.instanceFollowRedirects = true
                 conn.inputStream.use { input ->
-                    target.outputStream().use { out -> input.copyTo(out, chunkSize = 128 * 1024) }
+                    target.outputStream().use { out -> input.copyTo(out, 128 * 1024) }
                 }
                 entry.sizeBytes = target.length()
                 entry.status = "DONE"
@@ -538,17 +541,23 @@ object IabManager {
 
     /** 打印当前标签为 PDF（落盘 filesDir/downloads/）。 */
     suspend fun printPdf(tabId: String?): String {
-        contextOrUnavailable()
+        val ctx = contextOrUnavailable()
         return withContext(Dispatchers.Main) {
-            val ctx = contextOrUnavailable()
-        val tab = tabForBlocking(tabId)
-        val dir = File(ctx.filesDir, "downloads").apply { mkdirs() }
-        val file = File(dir, "iab_pdf_${System.currentTimeMillis()}.pdf")
-        runCatching {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
-                .use { pfd -> tab.webView.printToPdf(pfd, 0, 0, tab.webView.width.coerceAtLeast(800), tab.webView.height.coerceAtLeast(1000)) }
-        }.onFailure { throw IabError(IAB_PDF_FAILED, "printToPdf failed: ${it.message}") }
-        file.absolutePath
+            val tab = tabForBlocking(tabId)
+            val dir = File(ctx.filesDir, "downloads").apply { mkdirs() }
+            val file = File(dir, "iab_pdf_${System.currentTimeMillis()}.pdf")
+            val pfd = ParcelFileDescriptor.open(
+                file,
+                ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_WRITE_ONLY,
+            )
+            try {
+                tab.webView.printToPdf(pfd, 0, 0, tab.webView.width.coerceAtLeast(800), tab.webView.height.coerceAtLeast(1000))
+            } catch (e: Exception) {
+                throw IabError(IAB_PDF_FAILED, "printToPdf failed: ${e.message}")
+            } finally {
+                pfd.close()
+            }
+            file.absolutePath
         }
     }
 
@@ -612,7 +621,7 @@ object IabManager {
         return withContext(Dispatchers.Main) {
             val z = scale.coerceIn(0.25f, 3f)
             synchronized(lock) {
-                tabs.forEach { runCatching { it.webView.settings.zoomScale = z } }
+                tabs.forEach { runCatching { it.webView.settings.setZoomScale(z) } }
             }
             "zoom set to $z"
         }
@@ -753,50 +762,12 @@ object IabManager {
             )
             handler.cancel() // 安全默认：证书错误不放行
         }
-
-        /**
-         * window.open / target=_blank：开新标签（[createTabBlocking] 内部含 LRU 驱逐）。
-         * 框架提供的 newWebView 未被使用 → 主动 destroy 防泄漏。
-         */
-        override fun onCreatedWindow(view: WebView, newWebView: WebView?): Boolean {
-            val url = newWebView?.url
-            newWebView?.destroy()
-            if (url != null) {
-                runCatching {
-                    val tab = manager.createTabBlocking()
-                    manager.loadUrlBlocking(tab, url)
-                }.onFailure { Logger.w(TAG, "IAB new-window tab failed: ${it.message}") }
-            }
-            return true
-        }
-
-        override fun onShowContextMenu(view: WebView, contextMenu: ContextMenu?, hitTestResult: android.webkit.WebView.HitTestResult?) {
-            // IAB 里吞掉长按菜单（与 agent 自动化不冲突）
-            contextMenu?.clearMenu()
-        }
     }
 
     private class IabWebChromeClient(private val manager: IabManager) : WebChromeClient() {
 
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             manager.tabForWebView(view)?.progress = newProgress
-        }
-
-        override fun onReceivedTitle(view: WebView, title: String?) {
-            manager.tabForWebView(view)?.title = title.orEmpty()
-        }
-
-        override fun onDownloadStart(
-            view: WebView?,
-            url: String?,
-            userAgent: String?,
-            contentDisposition: String?,
-            mimeType: String?,
-            contentLength: Long,
-        ) {
-            val u = url?.takeIf { it.isNotBlank() } ?: return
-            val tab = view?.let { manager.tabForWebView(it) } ?: manager.activeTabForWebView()
-            if (tab != null) manager.handleDownloadStart(tab, u, userAgent, contentDisposition, mimeType)
         }
 
         override fun onShowFileChooser(
@@ -820,21 +791,6 @@ object IabManager {
                 )
             } else {
                 request.deny()
-            }
-        }
-
-        override fun onGeolocationPermissionsShowPrompt(
-            origin: String?,
-            callback: android.webkit.GeolocationPermissions.Callback?,
-        ) {
-            runCatching {
-                callback?.onGeolocationPermissionsShowPrompt(origin) { invoke ->
-                    if (manager.autoGrantMedia) invoke.onReceiveValue(true) else invoke.onReceiveValue(false)
-                    manager.activeTabForWebView()?.networkLog?.add(
-                        IabNetworkEntry(System.currentTimeMillis(), "GEO", origin.orEmpty(), null, if (manager.autoGrantMedia) "granted" else "denied")
-                    )
-                    false // 结果已由 onReceiveValue 给出
-                }
             }
         }
     }

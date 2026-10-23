@@ -49,7 +49,7 @@ data class IabTabInfo(
     val url: String,
     val title: String,
     val progress: Int,
-    active: Boolean,
+    val active: Boolean,
     val createdAtMs: Long,
     val lastActiveMs: Long,
 )
@@ -63,7 +63,7 @@ data class IabNetworkEntry(
     val note: String?,
 )
 
-/** 下载捕获记录（onDownloadStart → 后台落盘到 filesDir/downloads/）。 */
+/** 下载捕获记录（WebView.setDownloadListener → 后台落盘到 filesDir/downloads/）。 */
 data class IabDownload(
     val id: String,
     val url: String,

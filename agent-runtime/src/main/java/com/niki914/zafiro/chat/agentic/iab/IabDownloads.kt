@@ -12,16 +12,17 @@ object IabDownloads {
 
     /** 允许字符白名单：字母数字 . _ - 与中日韩；其余一律替换为 `_`。 */
     fun sanitizeName(raw: String): String {
-        val base = raw
+        val segment = raw
             .substringAfterLast('/')
             .substringAfterLast('\\')
             .trim()
             .let { if (it.length > 128) it.take(128) }
+        val cleaned = segment
             .map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
+            .joinToString("")
             .trim { it != '_' }
-            // 穿越防护：白名单之后 ".." 段只可能来自整段就是 ".."（或全点段），在此拦掉；
-            // 单点合法（report.pdf），双点段已不可能（白名单后每字符独立判定）。
-            .let { if (it.isEmpty() || it == "." || it == ".." || it.all { c -> c == '.' }) "download" else it }
+        // 穿越防护：白名单之后整段全点（"." / ".." / "..."）视为无效文件名。
+        return if (cleaned.isEmpty() || cleaned.all { it == '.' }) "download" else cleaned
     }
 
     /** 从 Content-Disposition / URL 路径推断建议文件名；无扩展时按 [mimeType] 补。 */

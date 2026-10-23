@@ -132,7 +132,7 @@ when a page looks like a mobile layout, emulate_desktop {enabled: true} then rel
 
             "tabs" -> {
                 val list = IabManager.tabs()
-                val arr = buildJsonArray { list.forEach { addElement(obj(it)) } }
+                val arr = buildJsonArray { list.forEach { add(obj(it)) } }
                 return ok("Tabs: ${list.map { it.id }}", JsonObject(mapOf("tabs" to arr)))
             }
 
@@ -247,7 +247,7 @@ when a page looks like a mobile layout, emulate_desktop {enabled: true} then rel
 
             "downloads" -> {
                 val list = IabManager.downloads(a["limit"]?.jsonPrimitiveOrNull()?.content?.toIntOrNull() ?: 20)
-                val arr = buildJsonArray { list.forEach { addElement(objDownload(it)) } }
+                val arr = buildJsonArray { list.forEach { add(objDownload(it)) } }
                 return ok("Downloads: ${list.size}", JsonObject(mapOf("downloads" to arr)))
             }
 

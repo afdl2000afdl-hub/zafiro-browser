@@ -31,7 +31,7 @@ class IabJsTest {
 
     @Test
     fun jsQuote_escapesControlCharsAsUnicode() {
-        assertEquals("'\\u0001'", IabJs.jsQuote(String(1)))
+        assertEquals("'\\u0001'", IabJs.jsQuote(String(charArrayOf('\u0001'))))
     }
 
     @Test

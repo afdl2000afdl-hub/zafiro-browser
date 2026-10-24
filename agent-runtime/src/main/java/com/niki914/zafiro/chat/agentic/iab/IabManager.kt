@@ -370,10 +370,6 @@ object IabManager {
     @Volatile
     var windowProvider: (() -> android.view.Window?)? = null
 
-    fun setWindowProvider(provider: (() -> android.view.Window?)?) {
-        windowProvider = provider
-    }
-
     /** PixelCopy（window 区域 → 标签 WebView 所在矩形）→ PNG → 共享 ingest 管线。 */
     internal suspend fun screenshot(tabId: String?): IngestResult {
         val ctx = contextOrUnavailable()

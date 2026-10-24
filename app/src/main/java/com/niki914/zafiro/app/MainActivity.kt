@@ -76,11 +76,11 @@ class MainActivity : AppCompatActivity() {
 
         // IAB 截图依赖 PixelCopy 的 Window 源（现代 SDK 已移除 View 源）：
         // 注册/注销当前窗口，浏览器截图在 window 内按 WebView 坐标取区域
-        IabManager.setWindowProvider { window }
+        IabManager.windowProvider = { window }
     }
 
     override fun onDestroy() {
-        IabManager.setWindowProvider(null)
+        IabManager.windowProvider = null
         super.onDestroy()
     }
 

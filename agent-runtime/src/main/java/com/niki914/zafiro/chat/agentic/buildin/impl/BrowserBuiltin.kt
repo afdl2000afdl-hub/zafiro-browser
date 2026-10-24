@@ -28,8 +28,8 @@ import kotlinx.serialization.json.put
  * 导航（navigate/back/forward/reload/stop/new_tab/close_tab/switch_tab/tabs）、
  * 读取（evaluate/page_text/page_html/query_selector/state/console/network）、
  * 交互（click/click_text/click_at/fill/set_checked/select_option/keypress/scroll/submit_form）、
- * 文件（file_upload/downloads/open_local/print_pdf）、
- * 环境（screenshot、cookie get/set/clear、clipboard read/write、set_ua、set_zoom、emulate_desktop、set_media_grant）。
+ * 文件（file_upload/downloads/open_local；print_pdf 保留但现代 SDK 无平台 API，返回 IAB_PDF_FAILED）、
+ * 环境（screenshot、cookie get/set/clear、clipboard read/write、set_ua、set_zoom（文本缩放）、emulate_desktop、set_media_grant）。
  *
  * 依赖装配：[IabManager] 为进程单例（上下文来自 App 启动的 ContextProvider），本工具零参构造，
  * 与 ScreenshotBuiltin/ViewImageBuiltin 同一模式。冷启动未就绪时返回 IAB_UNAVAILABLE（不挂起、不抛）。
@@ -53,7 +53,7 @@ Actions:
 - state {tab?}, console {limit?, tab?}, network {limit?, tab?}
 - cookies_get {url}, cookies_set {url, cookies}, cookies_clear {url}
 - clipboard_read, clipboard_write {text}
-- set_ua {user_agent?}, set_zoom {zoom}, emulate_desktop {enabled}, set_media_grant {enabled}
+- set_ua {user_agent?}, set_zoom {zoom} (text zoom), emulate_desktop {enabled}, set_media_grant {enabled}
 Tips: call tabs/navigate first, then poll state until progress=100 before reading content;
 when a page looks like a mobile layout, emulate_desktop {enabled: true} then reload.
     """.trimIndent()
@@ -392,7 +392,7 @@ when a page looks like a mobile layout, emulate_desktop {enabled: true} then rel
             IabManager.IAB_FILE_MISSING to "Verify the path exists (downloads action lists captured files).",
             IabManager.IAB_BAD_URL to "Check the URL (no script pseudo-URLs; data: capped at 400k chars).",
             IabManager.IAB_SCREENSHOT_FAILED to "Ensure the browser screen is open; retry after navigation settles.",
-            IabManager.IAB_PDF_FAILED to "Retry after the page has fully loaded.",
+            IabManager.IAB_PDF_FAILED to "PDF printing is unavailable on this SDK (platform removed the API); use the screenshot action instead.",
             IabManager.IAB_JS_ENGINE_ERROR to "The page may have navigated away or crashed; reload and retry.",
         )
 
@@ -421,7 +421,7 @@ when a page looks like a mobile layout, emulate_desktop {enabled: true} then rel
     "html": { "type": "string", "description": "Raw HTML to render via open_local." },
     "cookies": { "type": "string", "description": "Raw cookie string for cookies_set." },
     "user_agent": { "type": "string", "description": "Custom UA for set_ua (null/omit = default)." },
-    "zoom": { "type": "number", "description": "Zoom factor 0.25-3 for set_zoom." },
+    "zoom": { "type": "number", "description": "Text zoom factor 0.25-3.0 (maps to 50-300% text zoom on this SDK) for set_zoom." },
     "enabled": { "type": "boolean", "description": "Toggle for emulate_desktop / set_media_grant." }
   },
   "required": ["action"]

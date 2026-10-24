@@ -3,10 +3,10 @@ package com.niki914.zafiro.chat.agentic.iab
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.view.PixelCopy
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -39,8 +39,6 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.TimeUnit
 
 /**
  * IAB（In-App Browser）核心管理器：进程级单例（与 [SharedImageCodec] 同一装配模式——
@@ -48,7 +46,8 @@ import java.util.concurrent.TimeUnit
  *
  * 能力面（对齐 ZCode 的 IAB）：
  * - 多标签：每标签独占一个系统 WebView（Chromium 内核），[MAX_TABS] 上限，LRU 驱逐；
- *   window.open / target=_blank 自动开新标签（WebViewClient.onCreatedWindow）。
+ *   注：现代 SDK 的 WebViewClient 已移除 onCreatedWindow，window.open / target=_blank 不会自动开新标签，
+ *   需要时由 agent 显式 new_tab。
  * - 导航：navigate / back / forward / reload / stop；SSL 错误不静默放行（handler.cancel）。
  * - JS：evaluate（任意表达式 + await 语义，结果 JSON 归一）/ querySelector / page_text / page_html。
  * - 交互：fill（React 兼容 value setter）/ click / click_text / click_at / set_checked /
@@ -56,11 +55,13 @@ import java.util.concurrent.TimeUnit
  * - 文件上传：JS 点击 input[type=file] 触发原生选择器 → onShowFileChooser 回填 FileProvider Uri，
  *   只接受 App 私有目录内的文件（filesDir / cacheDir）。
  * - 下载捕获：WebView.setDownloadListener → 后台落盘 filesDir/downloads/，环形记录（status/size 可查）。
- * - 截图：PixelCopy(WebView) → PNG → SharedImageCodec ingest（与 screenshot/view_image 同契约）。
+ * - 截图：PixelCopy（宿主 Activity 注册的 Window 为源，按 WebView 在 window 内坐标取矩形）→ PNG →
+ *   SharedImageCodec ingest（与 screenshot/view_image 同契约；现代 SDK 已移除 View 源）。
  * - 日志：控制台钩子（console.* → 500 条环形缓冲）+ 网络请求级日志（200 条环形缓冲）。
  * - Cookie：android.webkit CookieManager（WebView 数据目录内跨重启持久）。
- * - 其余：剪贴板读写、UA 覆盖、桌面模式、缩放、媒体权限请求（onPermissionRequest 可开关自动放行）、
- *   打印 PDF、本地文件 / HTML 字符串预览（data: URI）。
+ * - 其余：剪贴板读写、UA 覆盖、桌面模式、文本缩放、媒体权限请求（onPermissionRequest 可开关自动放行）、
+ *   本地文件 / HTML 字符串预览（data: URI）。
+ *   注：现代 SDK 已移除 WebView.printToPdf，print_pdf 动作保留但返回 IAB_PDF_FAILED，请用 screenshot。
  *
  * 线程模型：全部 WebView 访问走主线程（withContext(Dispatchers.Main)）；下载在 IO 线程；
  * 标签表与环形缓冲加锁，主线程回调与挂起 API 共用。
@@ -89,7 +90,7 @@ object IabManager {
     /** evaluate 引擎回调超时（防标签销毁 / 页面崩溃导致永久挂起）。 */
     private const val EVALUATE_TIMEOUT_MS = 60_000L
 
-    class IabError(val code: String, val message: String) : Exception(message)
+    class IabError(val code: String, override val message: String) : Exception(message)
 
     /** 文件上传结果：ACCEPTED = 内核已接受；CHOOSER_SKIPPED = 选择器未弹出或选择被取消。 */
     data class IabUploadResult(val status: String, val detail: String)
@@ -360,13 +361,31 @@ object IabManager {
         }
     }
 
-    /** PixelCopy 当前标签 WebView → PNG → 共享 ingest 管线（与 screenshot / view_image 同契约）。 */
+    /**
+     * 当前 Activity 的 Window 提供者（截图用）：现代 SDK 的 PixelCopy 只接受
+     * Window/Surface/SurfaceView 作为源，WebView 是普通 View → 由宿主 Activity 注册
+     * 自己的 window（MainActivity.onCreate 注册，onDestroy 注销），截图时按
+     * WebView 在 window 内的坐标取区域。
+     */
+    @Volatile
+    var windowProvider: (() -> android.view.Window?)? = null
+
+    fun setWindowProvider(provider: (() -> android.view.Window?)?) {
+        windowProvider = provider
+    }
+
+    /** PixelCopy（window 区域 → 标签 WebView 所在矩形）→ PNG → 共享 ingest 管线。 */
     internal suspend fun screenshot(tabId: String?): IngestResult {
         val ctx = contextOrUnavailable()
         val codec = SharedImageCodec.get()
             ?: throw IabError(IAB_UNAVAILABLE, "Image codec is not available (context not ready).")
         val tab = tabForSuspend(tabId)
-        val (w, h) = withContext(Dispatchers.Main) {
+        val window = windowProvider?.invoke()
+            ?: throw IabError(
+                IAB_VIEW_DETACHED,
+                "No app window is registered for screenshots; open the in-app browser screen first, then retry.",
+            )
+        val srcRect: Rect = withContext(Dispatchers.Main) {
             val width = tab.webView.width
             val height = tab.webView.height
             if (width == 0 || height == 0) {
@@ -376,24 +395,35 @@ object IabManager {
                             "Open the in-app browser screen first, then retry.",
                 )
             }
-            width to height
+            val loc = IntArray(2)
+            tab.webView.getLocationInWindow(loc)
+            Rect(loc[0], loc[1], loc[0] + width, loc[1] + height)
         }
-        val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val future = CompletableFuture<Int>()
+        val bitmap = Bitmap.createBitmap(srcRect.width(), srcRect.height(), Bitmap.Config.ARGB_8888)
+        val deferred = CompletableDeferred<Int>()
         withContext(Dispatchers.Main) {
-            PixelCopy.copy(tab.webView, bitmap, future, Handler(Looper.getMainLooper()))
+            PixelCopy.request(
+                window,
+                srcRect,
+                bitmap,
+                object : PixelCopy.OnPixelCopyFinishedListener {
+                    override fun onPixelCopyFinished(copyResult: Int) {
+                        if (!deferred.isCompleted) deferred.complete(copyResult)
+                    }
+                },
+                Handler(Looper.getMainLooper()),
+            )
         }
         val result = withContext(Dispatchers.IO) {
-            try {
-                future.get(15, TimeUnit.SECONDS)
-            } catch (e: Exception) {
-                bitmap.recycle()
-                throw IabError(IAB_SCREENSHOT_FAILED, "PixelCopy failed: ${e.message}")
-            }
+            withTimeoutOrNull(15_000L) { deferred.await() }
+                ?: throw IabError(IAB_SCREENSHOT_FAILED, "PixelCopy timed out (15s).")
         }
-        if (result != PixelCopy.Result.SUCCESS) {
+        if (result != PixelCopy.SUCCESS) {
             bitmap.recycle()
-            throw IabError(IAB_SCREENSHOT_FAILED, "PixelCopy returned code $result (secure content or invalid view).")
+            throw IabError(
+                IAB_SCREENSHOT_FAILED,
+                "PixelCopy status $result (source not visible/invalid, or destination error; the app must be in the foreground).",
+            )
         }
         val file = withContext(Dispatchers.IO) {
             val dir = File(ctx.cacheDir, "iab_shots").apply { mkdirs() }
@@ -539,26 +569,18 @@ object IabManager {
 
     // ------------------------------------------------------------- print / cookies / clipboard
 
-    /** 打印当前标签为 PDF（落盘 filesDir/downloads/）。 */
+    /**
+     * 打印当前标签为 PDF：现代 SDK 的公开 API 已移除 WebView.printToPdf，
+     * 本动作保留（工具面完整）但不可用——校验标签后抛 IAB_PDF_FAILED，
+     * 工具结果会建议改用 screenshot。
+     */
     suspend fun printPdf(tabId: String?): String {
-        val ctx = contextOrUnavailable()
-        return withContext(Dispatchers.Main) {
-            val tab = tabForBlocking(tabId)
-            val dir = File(ctx.filesDir, "downloads").apply { mkdirs() }
-            val file = File(dir, "iab_pdf_${System.currentTimeMillis()}.pdf")
-            val pfd = ParcelFileDescriptor.open(
-                file,
-                ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_WRITE_ONLY,
-            )
-            try {
-                tab.webView.printToPdf(pfd, 0, 0, tab.webView.width.coerceAtLeast(800), tab.webView.height.coerceAtLeast(1000))
-            } catch (e: Exception) {
-                throw IabError(IAB_PDF_FAILED, "printToPdf failed: ${e.message}")
-            } finally {
-                pfd.close()
-            }
-            file.absolutePath
-        }
+        contextOrUnavailable()
+        withContext(Dispatchers.Main) { tabForBlocking(tabId) }
+        throw IabError(
+            IAB_PDF_FAILED,
+            "PDF printing is unavailable on this SDK: the platform removed WebView.printToPdf from the public API. Use the screenshot action instead.",
+        )
     }
 
     suspend fun cookiesGet(url: String): String = withContext(Dispatchers.IO) {
@@ -616,14 +638,15 @@ object IabManager {
         }
     }
 
+    /** 页面缩放：现代 SDK 的 WebSettings 已移除 setZoomScale，改用最接近的 setTextZoom（50–300%）。 */
     suspend fun setZoom(scale: Float): String {
         contextOrUnavailable()
         return withContext(Dispatchers.Main) {
-            val z = scale.coerceIn(0.25f, 3f)
+            val percent = (scale.coerceIn(0.25f, 3f) * 100).toInt().coerceIn(50, 300)
             synchronized(lock) {
-                tabs.forEach { runCatching { it.webView.settings.setZoomScale(z) } }
+                tabs.forEach { runCatching { it.webView.settings.setTextZoom(percent) } }
             }
-            "zoom set to $z"
+            "text zoom set to $percent%"
         }
     }
 
@@ -733,11 +756,6 @@ object IabManager {
             tab.networkLog.add(IabNetworkEntry(System.currentTimeMillis(), "PAGE", url.orEmpty(), null, "finished"))
         }
 
-        override fun onReceivedTitle(view: WebView, title: String?) {
-            super.onReceivedTitle(view, title)
-            manager.tabForWebView(view)?.title = title.orEmpty()
-        }
-
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             // 只记录、不拦截（返回 null = 正常加载）
             manager.tabForWebView(view)?.networkLog?.add(
@@ -765,6 +783,11 @@ object IabManager {
     }
 
     private class IabWebChromeClient(private val manager: IabManager) : WebChromeClient() {
+
+        // 标题回调在 WebChromeClient（现代 SDK 的 WebViewClient 已无 onReceivedTitle）
+        override fun onReceivedTitle(view: WebView, title: String?) {
+            manager.tabForWebView(view)?.title = title.orEmpty()
+        }
 
         override fun onProgressChanged(view: WebView, newProgress: Int) {
             manager.tabForWebView(view)?.progress = newProgress

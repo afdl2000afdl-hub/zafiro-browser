@@ -12,11 +12,7 @@ object IabDownloads {
 
     /** 允许字符白名单：字母数字 . _ - 与中日韩；其余一律替换为 `_`。 */
     fun sanitizeName(raw: String): String {
-        val segment = raw
-            .substringAfterLast('/')
-            .substringAfterLast('\\')
-            .trim()
-            .let { if (it.length > 128) it.take(128) }
+        val segment = raw.substringAfterLast('/').substringAfterLast('\\').trim().take(128)
         val cleaned = segment
             .map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
             .joinToString("")

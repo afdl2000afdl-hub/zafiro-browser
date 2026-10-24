@@ -16,6 +16,7 @@ import com.niki914.zafiro.app.ui.ZafiroApp
 import com.niki914.zafiro.app.ui.model.AppLaunchDecision
 import com.niki914.zafiro.app.ui.model.ThemeController
 import com.niki914.zafiro.business.application.ApplicationService
+import com.niki914.zafiro.chat.agentic.iab.IabManager
 import com.niki914.zafiro.repo.XRepo
 import com.niki914.zafiro.service.findService
 import com.niki914.zafiro.service.requireService
@@ -72,6 +73,15 @@ class MainActivity : AppCompatActivity() {
                 launchDecision = launchDecision,
             )
         }
+
+        // IAB 截图依赖 PixelCopy 的 Window 源（现代 SDK 已移除 View 源）：
+        // 注册/注销当前窗口，浏览器截图在 window 内按 WebView 坐标取区域
+        IabManager.setWindowProvider { window }
+    }
+
+    override fun onDestroy() {
+        IabManager.setWindowProvider(null)
+        super.onDestroy()
     }
 
     override fun onNewIntent(intent: Intent) {

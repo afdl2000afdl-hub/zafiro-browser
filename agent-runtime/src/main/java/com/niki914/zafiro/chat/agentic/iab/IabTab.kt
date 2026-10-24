@@ -79,7 +79,9 @@ data class IabDownload(
  * 纯 JVM 类型——日志/网络/下载三个 ring 都是它，便于单测。
  */
 class IabRingBuffer<T>(val capacity: Int) {
-    require(capacity > 0) { "capacity must be > 0" }
+    init {
+        require(capacity > 0) { "capacity must be > 0" }
+    }
 
     private val items = ArrayDeque<T>()
     private val lock = Any()

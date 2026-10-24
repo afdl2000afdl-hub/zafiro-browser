@@ -16,7 +16,7 @@ object IabDownloads {
         val cleaned = segment
             .map { c -> if (c.isLetterOrDigit() || c == '.' || c == '_' || c == '-') c else '_' }
             .joinToString("")
-            .trim { it != '_' }
+            .trim { it == '_' }
         // 穿越防护：白名单之后整段全点（"." / ".." / "..."）视为无效文件名。
         return if (cleaned.isEmpty() || cleaned.all { it == '.' }) "download" else cleaned
     }

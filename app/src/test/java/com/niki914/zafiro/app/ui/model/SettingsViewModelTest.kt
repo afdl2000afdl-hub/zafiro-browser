@@ -37,6 +37,7 @@ class SettingsViewModelTest {
                 ZafiroSettingsGroup.Tools,
                 ZafiroSettingsGroup.Skills,
                 ZafiroSettingsGroup.Actions,
+                ZafiroSettingsGroup.Browser,
             ),
             state.sections[2].groups,
         )

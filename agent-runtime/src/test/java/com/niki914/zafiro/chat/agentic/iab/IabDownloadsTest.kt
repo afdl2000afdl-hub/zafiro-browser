@@ -47,8 +47,12 @@ class IabDownloadsTest {
             contentDisposition = "attachment; filename*=UTF-8''na%C3%A4me.csv",
             mimeType = "text/csv",
         )
-        // URLDecoder 解码 UTF-8 百分号编码（%C3%A4 = ä）
-        assertEquals("näme.csv", name)
+        // Expected uses a \u00E4 escape (pure-ASCII in the source) so the literal
+        // compiles identically no matter which charset the CI Kotlin daemon uses
+        // to read this .kt file (JDK 17 file.encoding is locale-derived and the
+        // runner locale is not UTF-8). Runtime actual is charset-independent: it
+        // comes from URLDecoder(..., "UTF-8") decoding the percent-encoded input.
+        assertEquals("n\u00E4me.csv", name)
     }
 
     @Test

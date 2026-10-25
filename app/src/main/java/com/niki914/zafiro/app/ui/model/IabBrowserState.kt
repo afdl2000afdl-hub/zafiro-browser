@@ -38,7 +38,7 @@ data class IabBrowserUiState(
 
 sealed interface IabBrowserIntent {
     /** 进入页面：确保至少一个标签 + 刷新全部快照。 */
-    data object Load
+    data object Load : IabBrowserIntent
 
     /** 地址栏提交（有标签 → 导航；无标签 → 新开）。 */
     data class Navigate(val url: String) : IabBrowserIntent

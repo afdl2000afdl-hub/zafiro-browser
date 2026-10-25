@@ -101,7 +101,7 @@ fun IabBrowserContent(
         // ---- 地址栏 + 新建标签
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Center,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             OutlinedTextField(
@@ -170,7 +170,7 @@ fun IabBrowserContent(
                     },
                 ) {
                     Row(
-                        verticalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.Center,
                         horizontalArrangement = Arrangement.spacedBy(2.dp),
                         modifier = Modifier.padding(start = 10.dp, top = 2.dp, bottom = 2.dp),
                     ) {
@@ -195,7 +195,7 @@ fun IabBrowserContent(
         // ---- 工具行
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Center,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             IconButton(onClick = { viewModel.sendIntent(IabBrowserIntent.Back) }) {

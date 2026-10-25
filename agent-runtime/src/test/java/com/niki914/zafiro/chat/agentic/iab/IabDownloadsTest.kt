@@ -44,15 +44,17 @@ class IabDownloadsTest {
     fun suggestedName_prefersContentDispositionStar() {
         val name = IabDownloads.suggestedName(
             url = "https://example.com/dl",
-            contentDisposition = "attachment; filename*=UTF-8''na%C3%A4me.csv",
+            contentDisposition = "attachment; filename*=UTF-8''na%C3%AFve.csv",
             mimeType = "text/csv",
         )
-        // Expected uses a \u00E4 escape (pure-ASCII in the source) so the literal
-        // compiles identically no matter which charset the CI Kotlin daemon uses
-        // to read this .kt file (JDK 17 file.encoding is locale-derived and the
-        // runner locale is not UTF-8). Runtime actual is charset-independent: it
-        // comes from URLDecoder(..., "UTF-8") decoding the percent-encoded input.
-        assertEquals("n\u00E4me.csv", name)
+        // RFC 5987 filename*=UTF-8'...' value "na%C3%AFve.csv" percent-encodes
+        // "naïve.csv" (ï = U+00EF, UTF-8 bytes C3 AF). URLDecoder(..., "UTF-8")
+        // decodes it back to clean UTF-8 and sanitizeName keeps ï as a letter, so
+        // the suggested name is exactly "naïve.csv". The expected literal uses a
+        // \u00EF escape (pure ASCII in the source) so it compiles identically no
+        // matter which charset the CI Kotlin daemon reads this .kt file with; the
+        // decoded value is charset-independent either way (it comes from the JVM).
+        assertEquals("na\u00EFve.csv", name)
     }
 
     @Test
